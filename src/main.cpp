@@ -29,7 +29,7 @@
 
 /* dev */
 
-#define DEBUG 1
+// #define DEBUG 1
 
 #define BLE_AXIS_MIN 0
 #define BLE_AXIS_MAX 2048
@@ -98,6 +98,22 @@ TickTwo sleep_timeout(deep_sleep, SLEEP_TIMEOUT * 60000, 0);
 TickTwo delayed_press_timeout(delayed_press, 120, 1); // 120ms
 TickTwo button_sleep_timeout(deep_sleep, SLEEP_BUTTON_TIMEOUT * 1000, 1);
 
+void stop_all_timers () {
+  poll_interval.stop();
+  delayed_press_timeout.stop();
+  led_interval.stop();
+  sleep_timeout.stop();
+  button_sleep_timeout.stop();
+}
+
+void update_all_timers () {
+  poll_interval.update();
+  delayed_press_timeout.update();
+  led_interval.update();
+  sleep_timeout.update();
+  button_sleep_timeout.update();
+}
+
 // https://github.com/Minimuino/thumbstick-deadzones
 
 float map_range (float value, float old_min, float old_max, float new_min, float new_max) {
@@ -122,13 +138,6 @@ float dz_scaled_radial (float input) {
 
 void delayed_press () {
   MENU_STATE = MENU_STATE_EXPIRED;
-}
-
-void deep_sleep () {
-  #ifdef DEBUG
-    Serial.print("entering sleep mode\n");
-  #endif
-  esp_deep_sleep_start();
 }
 
 void write_button_state (byte i, byte state) {
@@ -331,6 +340,43 @@ void toggle_led () {
   digitalWrite(LED_PIN, led_state = !led_state);
 }
 
+void write_inputs () {
+  byte i;
+
+  for (i = 0; i < button_count; i++) {
+    write_button_state(i, button_states[i]);
+  }
+  for (i = 0; i < special_button_count; i++) {
+    write_special_button_state(i, special_button_states[i]);
+  }
+  if (DIGITAL_MODE) {
+    write_axis_hat(axis_states[X_AXIS_KEY], axis_states[Y_AXIS_KEY]);
+    for (i = 0; i < axis_count; i++) {
+      write_axis_state(i, 0.0);
+    }
+  } else {
+    write_axis_hat(0.0, 0.0);
+    for (i = 0; i < axis_count; i++) {
+      write_axis_state(i, axis_states[i]);
+    }
+  }
+
+  ble_gamepad.sendReport();
+}
+
+void deep_sleep () {
+  stop_all_timers();
+
+  #ifdef DEBUG
+    Serial.print("entering sleep mode\n");
+  #endif
+  reset_inputs();
+  write_inputs();
+  // delay needed otherwise buttons remain pressed (?)
+  delay(120);
+  esp_deep_sleep_start();
+}
+
 void poll () {
   // Bluetooth not connected
   if (!ble_gamepad.isConnected()) {
@@ -515,30 +561,9 @@ void poll () {
   }
 
   // REPORT
-  for (i = 0; i < button_count; i++) {
-    write_button_state(i, button_states[i]);
-  }
-  for (i = 0; i < special_button_count; i++) {
-    write_special_button_state(i, special_button_states[i]);
-  }
-  if (DIGITAL_MODE) {
-    write_axis_hat(axis_states[X_AXIS_KEY], axis_states[Y_AXIS_KEY]);
-    for (i = 0; i < axis_count; i++) {
-      write_axis_state(i, 0.0);
-    }
-  } else {
-    write_axis_hat(0, 0);
-    for (i = 0; i < axis_count; i++) {
-      write_axis_state(i, axis_states[i]);
-    }
-  }
-  ble_gamepad.sendReport();
+  write_inputs();
 }
 
 void loop () {
-  poll_interval.update();
-  delayed_press_timeout.update();
-  led_interval.update();
-  sleep_timeout.update();
-  button_sleep_timeout.update();
+  update_all_timers();
 }

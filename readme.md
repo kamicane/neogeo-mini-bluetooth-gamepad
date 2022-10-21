@@ -1,6 +1,6 @@
 # Neogeo BLE gamepad
 
-Bluetooth conversion of a Neogeo mini PAD controller
+Bluetooth conversion of the Neogeo mini gamepad
 
 ## Features
 
