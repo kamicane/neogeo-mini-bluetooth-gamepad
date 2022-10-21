@@ -370,8 +370,6 @@ void setup () {
 
   if (CALIBRATION_MODE) {
 
-    preferences.clear();
-
     for (i = 0; i < axis_count; i++) {
       axis_min[i] = 0.0;
       axis_max[i] = 0.0;
