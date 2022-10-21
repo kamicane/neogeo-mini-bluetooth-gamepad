@@ -1,6 +1,6 @@
 // config
 
-#define POLL_RATE 500 // 0.5ms
+#define POLL_RATE 1000 // 1ms
 #define DEADZONE 0.20
 
 #define SLEEP_TIMEOUT 5 // minutes
@@ -25,7 +25,7 @@
 #define BLE_AXIS_MIN 0
 #define BLE_AXIS_MAX 2048
 
-#define DEBUG 1
+// #define DEBUG 1
 
 // end config
 
@@ -229,7 +229,7 @@ byte adc (float x, float y) {
     if (y < slope_x) dpad_up = true;
   }
 
-  return compute_dpad_value(dpad_up, dpad_left, dpad_down, dpad_right);
+  return compute_dpad_value(dpad_up, dpad_right, dpad_down, dpad_left);
 }
 
 void write_axis_dpad (float x_state, float y_state) {
