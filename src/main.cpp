@@ -140,7 +140,7 @@ void delayed_press () {
   MENU_STATE = MENU_STATE_EXPIRED;
 }
 
-void write_button_state (byte i, byte state) {
+void write_button (byte i, byte state) {
   byte button = buttons[i];
   if (state == LOW) {
     ble_gamepad.press(button);
@@ -153,7 +153,7 @@ void set_button_state (byte i, byte state) {
   button_states[i] = state;
 }
 
-void write_special_button_state (byte i, byte state) {
+void write_special_button (byte i, byte state) {
   byte button = special_buttons[i];
 
   if (state == LOW) {
@@ -167,61 +167,70 @@ void set_special_button_state (byte i, byte state) {
   special_button_states[i] = state;
 }
 
+byte compute_dpad_value (bool dpad_up, bool dpad_right, bool dpad_down, bool dpad_left) {
+  byte dpad_value = DPAD_CENTERED;
+
+  if (dpad_up) {
+    if (dpad_right) {
+      dpad_value = DPAD_UP_RIGHT;
+    } else if (dpad_left) {
+      dpad_value = DPAD_UP_LEFT;
+    } else {
+      dpad_value = DPAD_UP;
+    }
+  } else if (dpad_down) {
+    if (dpad_right) {
+      dpad_value = DPAD_DOWN_RIGHT;
+    } else if (dpad_left) {
+      dpad_value = DPAD_DOWN_LEFT;
+    } else {
+      dpad_value = DPAD_DOWN;
+    }
+  } else if (dpad_left) {
+    dpad_value = DPAD_LEFT;
+  } else if (dpad_right) {
+    dpad_value = DPAD_RIGHT;
+  }
+
+  return dpad_value;
+}
+
 // https://gamingprojects.wordpress.com/2017/08/04/converting-analog-joystick-to-digital-joystick-signals/
 
 const float slope = 0.414214;
 
 byte adc (float x, float y) {
-  bool hat_up = false;
-  bool hat_down = false;
-  bool hat_left = false;
-  bool hat_right = false;
+  bool dpad_up = false;
+  bool dpad_down = false;
+  bool dpad_left = false;
+  bool dpad_right = false;
+
+  // squared deadzone?
+
+  const float slope_y = slope * y;
+  const float slope_x = slope * x;
 
   if (x > 0.0) {
-    if (x > slope * y) hat_right = true;
+    if (x > slope_y) dpad_right = true;
   } else if (x < 0.0) {
-    if (x < slope * y) hat_left = true;
+    if (x < slope_y) dpad_left = true;
   }
 
   if (y > 0.0) {
-    if (y > slope * x) hat_down = true;
+    if (y > slope_x) dpad_down = true;
   } else if (y < 0.0) {
-    if (y < slope * x) hat_up = true;
+    if (y < slope_x) dpad_up = true;
   }
 
-  byte hat_value = DPAD_CENTERED;
-
-  if (hat_up) {
-    if (hat_right) {
-      hat_value = DPAD_UP_RIGHT;
-    } else if (hat_left) {
-      hat_value = DPAD_UP_LEFT;
-    } else {
-      hat_value = DPAD_UP;
-    }
-  } else if (hat_down) {
-    if (hat_right) {
-      hat_value = DPAD_DOWN_RIGHT;
-    } else if (hat_left) {
-      hat_value = DPAD_DOWN_LEFT;
-    } else {
-      hat_value = DPAD_DOWN;
-    }
-  } else if (hat_left) {
-    hat_value = DPAD_LEFT;
-  } else if (hat_right) {
-    hat_value = DPAD_RIGHT;
-  }
-
-  return hat_value;
+  return compute_dpad_value(dpad_up, dpad_left, dpad_down, dpad_right);
 }
 
-void write_axis_hat (float x_state, float y_state) {
-  byte hat_value = adc(x_state, y_state);
-  ble_gamepad.setHat(hat_value);
+void write_axis_dpad (float x_state, float y_state) {
+  byte dpad_value = adc(x_state, y_state);
+  ble_gamepad.setHat(dpad_value);
 }
 
-void write_axis_state (byte i, float state) {
+void write_axis (byte i, float state) {
   byte axis = axes[i];
   int16_t state_ble = map_range(state, -1.0, 1.0, BLE_AXIS_MIN, BLE_AXIS_MAX);
 
@@ -344,20 +353,20 @@ void write_inputs () {
   byte i;
 
   for (i = 0; i < button_count; i++) {
-    write_button_state(i, button_states[i]);
+    write_button(i, button_states[i]);
   }
   for (i = 0; i < special_button_count; i++) {
-    write_special_button_state(i, special_button_states[i]);
+    write_special_button(i, special_button_states[i]);
   }
   if (DIGITAL_MODE) {
-    write_axis_hat(axis_states[X_AXIS_KEY], axis_states[Y_AXIS_KEY]);
+    write_axis_dpad(axis_states[X_AXIS_KEY], axis_states[Y_AXIS_KEY]);
     for (i = 0; i < axis_count; i++) {
-      write_axis_state(i, 0.0);
+      write_axis(i, 0.0);
     }
   } else {
-    write_axis_hat(0.0, 0.0);
+    write_axis_dpad(0.0, 0.0);
     for (i = 0; i < axis_count; i++) {
-      write_axis_state(i, axis_states[i]);
+      write_axis(i, axis_states[i]);
     }
   }
 
@@ -372,9 +381,47 @@ void deep_sleep () {
   #endif
   reset_inputs();
   write_inputs();
-  // delay needed otherwise buttons remain pressed (?)
+  // delay needed otherwise buttons remain pressed briefly on disconnect (?)
   delay(120);
   esp_deep_sleep_start();
+}
+
+void handle_soft_menu () {
+  byte start_state = special_button_states[START_KEY];
+  byte select_state = special_button_states[SELECT_KEY];
+
+  if (MENU_STATE == MENU_STATE_LOW) {
+    if (start_state == HIGH && select_state == HIGH) {
+      MENU_STATE = MENU_STATE_HIGH;
+      set_special_button_state(MENU_KEY, HIGH);
+    }
+  }
+
+  if (MENU_STATE == MENU_STATE_HIGH) {
+    if (start_state == LOW || select_state == LOW) {
+      MENU_STATE = MENU_STATE_WAITING;
+      delayed_press_timeout.start();
+    }
+  }
+
+  if (MENU_STATE == MENU_STATE_WAITING) {
+    if (start_state == LOW && select_state == LOW) {
+      MENU_STATE = MENU_STATE_LOW;
+      delayed_press_timeout.stop();
+      set_special_button_state(MENU_KEY, LOW);
+    }
+  }
+
+  if (MENU_STATE == MENU_STATE_WAITING || MENU_STATE == MENU_STATE_LOW) {
+    set_special_button_state(START_KEY, HIGH);
+    set_special_button_state(SELECT_KEY, HIGH);
+  }
+
+  if (MENU_STATE == MENU_STATE_EXPIRED) {
+    if (start_state == HIGH && select_state == HIGH) {
+      MENU_STATE = MENU_STATE_HIGH;
+    }
+  }
 }
 
 void poll () {
@@ -416,7 +463,7 @@ void poll () {
     set_button_state(i, button_state);
   }
 
-  // START, SELECT, MENU
+  // START, SELECT
 
   for (i = 0; i < special_button_count; i++) {
     special_button_states_old[i] = special_button_states[i];
@@ -427,45 +474,11 @@ void poll () {
     set_special_button_state(i, button_state);
   }
 
-  // MENU HANDLING
+  // MENU
 
-  bool start_state = special_button_states[START_KEY];
-  bool select_state = special_button_states[SELECT_KEY];
+  handle_soft_menu();
 
-  if (MENU_STATE == MENU_STATE_LOW) {
-    if (start_state == HIGH && select_state == HIGH) {
-      MENU_STATE = MENU_STATE_HIGH;
-      set_special_button_state(MENU_KEY, HIGH);
-    }
-  }
-
-  if (MENU_STATE == MENU_STATE_HIGH) {
-    if (start_state == LOW || select_state == LOW) {
-      MENU_STATE = MENU_STATE_WAITING;
-      delayed_press_timeout.start();
-    }
-  }
-
-  if (MENU_STATE == MENU_STATE_WAITING) {
-    if (start_state == LOW && select_state == LOW) {
-      MENU_STATE = MENU_STATE_LOW;
-      delayed_press_timeout.stop();
-      set_special_button_state(MENU_KEY, LOW);
-    }
-  }
-
-  if (MENU_STATE == MENU_STATE_WAITING || MENU_STATE == MENU_STATE_LOW) {
-    set_special_button_state(START_KEY, HIGH);
-    set_special_button_state(SELECT_KEY, HIGH);
-  }
-
-  if (MENU_STATE == MENU_STATE_EXPIRED) {
-    if (start_state == HIGH && select_state == HIGH) {
-      MENU_STATE = MENU_STATE_HIGH;
-    }
-  }
-
-  // FORCE SLEEP HANDLING
+  // FORCE SLEEP
 
   if (special_button_states[SELECT_KEY] == LOW) {
     if (button_sleep_timeout.state() != RUNNING) button_sleep_timeout.start();
@@ -473,7 +486,7 @@ void poll () {
     button_sleep_timeout.stop();
   }
 
-  // DIGITAL MODE
+  // TOGGLE DIGITAL MODE
   if (
     special_button_states[SELECT_KEY] == LOW &&
     button_states[D_KEY] == LOW &&
@@ -560,7 +573,7 @@ void poll () {
     sleep_timeout.start();
   }
 
-  // REPORT
+  // WRITE
   write_inputs();
 }
 
