@@ -6,13 +6,6 @@
 #define SLEEP_TIMEOUT 5 // minutes
 #define SLEEP_BUTTON_TIMEOUT 5 // seconds
 
-/* calibration */
-
-#define X_AXIS_MIN -0.8
-#define X_AXIS_MAX 0.8
-#define Y_AXIS_MIN -0.8
-#define Y_AXIS_MAX 0.7
-
 /* pins */
 
 #define X_AXIS_PIN 34
@@ -27,18 +20,19 @@
 
 #define LED_PIN 22
 
-/* dev */
-
-// #define DEBUG 1
+/* ble */
 
 #define BLE_AXIS_MIN 0
 #define BLE_AXIS_MAX 2048
+
+#define DEBUG 1
 
 // end config
 
 #include <Arduino.h>
 #include <BleGamepad.h>
 #include <TickTwo.h>
+#include <Preferences.h>
 
 const uint axis_count = 2;
 const uint button_count = 4;
@@ -50,6 +44,12 @@ const byte Y_AXIS_KEY = 1;
 const byte axes[] = { X_AXIS, Y_AXIS };
 const byte axis_pins[] = { X_AXIS_PIN, Y_AXIS_PIN };
 float axis_states[] = { 0.0, 0.0 };
+
+const char * axis_min_names[] = { "x-axis-min", "y-axis-min" };
+const char * axis_max_names[] = { "x-axis-max", "y-axis-max" };
+
+float axis_min[] = { -1.0, -1.0 };
+float axis_max[] = { 1.0, 1.0 };
 
 const byte A_KEY = 0;
 const byte B_KEY = 1;
@@ -73,8 +73,8 @@ float axis_states_raw[axis_count];
 byte button_states_old[button_count];
 byte special_button_states_old[special_button_count];
 
-bool is_connected = false;
-byte led_state = HIGH;
+bool IS_CONNECTED = false;
+byte LED_STATE = HIGH;
 
 const byte MENU_STATE_WAITING = 0;
 const byte MENU_STATE_LOW = 1;
@@ -83,16 +83,21 @@ const byte MENU_STATE_EXPIRED = 3;
 byte MENU_STATE = MENU_STATE_HIGH;
 
 bool DIGITAL_MODE = false;
+bool CALIBRATION_MODE = false;
 
 BleGamepad ble_gamepad("Neo Geo Mini Gamepad", "SNK", 100);
 BleGamepadConfiguration ble_gamepad_cfg;
 
+Preferences preferences;
+
 void poll ();
+void poll_calibrate ();
 void toggle_led ();
 void deep_sleep ();
 void delayed_press ();
 
 TickTwo poll_interval(poll, POLL_RATE, 0, MICROS_MICROS);
+TickTwo calibrate_interval(poll_calibrate, POLL_RATE, 0, MICROS_MICROS);
 TickTwo led_interval(toggle_led, 1000, 0); // 1 second
 TickTwo sleep_timeout(deep_sleep, SLEEP_TIMEOUT * 60000, 0);
 TickTwo delayed_press_timeout(delayed_press, 120, 1); // 120ms
@@ -100,6 +105,7 @@ TickTwo button_sleep_timeout(deep_sleep, SLEEP_BUTTON_TIMEOUT * 1000, 1);
 
 void stop_all_timers () {
   poll_interval.stop();
+  calibrate_interval.stop();
   delayed_press_timeout.stop();
   led_interval.stop();
   sleep_timeout.stop();
@@ -108,6 +114,7 @@ void stop_all_timers () {
 
 void update_all_timers () {
   poll_interval.update();
+  calibrate_interval.update();
   delayed_press_timeout.update();
   led_interval.update();
   sleep_timeout.update();
@@ -245,21 +252,27 @@ void write_axis (byte i, float state) {
   }
 }
 
-void set_axis_state (byte i, float state) {
-  byte axis = axes[i];
-  float state_new_calibrated;
-
-  switch (axis) {
-    case X_AXIS:
-      state_new_calibrated = map_range(state, X_AXIS_MIN, X_AXIS_MAX, -1.0, 1.0);
-      break;
-
-    case Y_AXIS:
-      state_new_calibrated = map_range(state, Y_AXIS_MIN, Y_AXIS_MAX, -1.0, 1.0);
-      break;
+void set_axis_calibrate (byte i, float state) {
+  if (state > axis_max[i]) {
+    #ifdef DEBUG
+      Serial.print("axis " + String(i) + " new max: " + String(state) + "\n");
+    #endif
+    axis_max[i] = state;
   }
+  else if (state < axis_min[i]) {
+    #ifdef DEBUG
+      Serial.print("axis " + String(i) + " new min: " + String(state) + "\n");
+    #endif
+    axis_min[i] = state;
+  }
+}
 
-  float dz_state = dz_scaled_radial(state_new_calibrated);
+void set_axis_state (byte i, float state) {
+  float state_calibrated;
+
+  state_calibrated = map_range(state, axis_min[i], axis_max[i], -1.0, 1.0);
+
+  float dz_state = dz_scaled_radial(state_calibrated);
   axis_states[i] = dz_state;
 }
 
@@ -281,6 +294,8 @@ void setup () {
     Serial.begin(115200);
     Serial.print("setup\n");
   #endif
+
+  preferences.begin("neogeo-ble", false);
 
   byte i;
 
@@ -317,10 +332,25 @@ void setup () {
 
   pinMode(LED_PIN, OUTPUT);
 
-  if (digitalRead(BUTTON_D_PIN) == LOW) {
+  if (digitalRead(BUTTON_A_PIN) == LOW) {
+    DIGITAL_MODE = false;
+  } else if (digitalRead(BUTTON_D_PIN) == LOW) {
     DIGITAL_MODE = true;
+  } else {
+    DIGITAL_MODE = preferences.getBool("digital-mode", false);
+  }
+
+  #ifdef DEBUG
+    if (DIGITAL_MODE)
+      Serial.print("digital mode\n");
+    else
+      Serial.print("analog mode\n");
+  #endif
+
+  if (digitalRead(BUTTON_C_PIN) == LOW) {
+    CALIBRATION_MODE = true;
     #ifdef DEBUG
-      Serial.print("DIGITAL MODE SELECTED\n");
+      Serial.print("CALIBRATION MODE\n");
     #endif
   }
 
@@ -334,19 +364,45 @@ void setup () {
   ble_gamepad_cfg.setHatSwitchCount(1);
   ble_gamepad_cfg.setWhichAxes(true, true, false, false, false, false, false, false);
 
-  ble_gamepad.begin(&ble_gamepad_cfg);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)START_BUTTON_PIN, LOW);
 
   reset_inputs();
 
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)START_BUTTON_PIN, LOW);
+  if (CALIBRATION_MODE) {
 
-  poll_interval.start();
-  led_interval.start();
-  sleep_timeout.start();
+    preferences.clear();
+
+    for (i = 0; i < axis_count; i++) {
+      axis_min[i] = 0.0;
+      axis_max[i] = 0.0;
+    }
+
+    calibrate_interval.start();
+
+  } else {
+
+    for (i = 0; i < axis_count; i++) {
+      axis_min[i] = preferences.getFloat(axis_min_names[i], -1.0);
+      axis_max[i] = preferences.getFloat(axis_max_names[i], 1.0);
+
+      #ifdef DEBUG
+        Serial.print("axis " + String(i) +
+          " min: " + String(axis_min[i]) +
+          ", max: " + String(axis_max[i]) + "\n"
+        );
+      #endif
+    }
+
+    ble_gamepad.begin(&ble_gamepad_cfg);
+
+    poll_interval.start();
+    led_interval.start();
+    sleep_timeout.start();
+  }
 }
 
 void toggle_led () {
-  digitalWrite(LED_PIN, led_state = !led_state);
+  digitalWrite(LED_PIN, LED_STATE = !LED_STATE);
 }
 
 void write_inputs () {
@@ -381,6 +437,9 @@ void deep_sleep () {
   #endif
   reset_inputs();
   write_inputs();
+
+  preferences.putBool("digital-mode", DIGITAL_MODE);
+
   // delay needed otherwise buttons remain pressed briefly on disconnect (?)
   delay(120);
   esp_deep_sleep_start();
@@ -424,16 +483,59 @@ void handle_soft_menu () {
   }
 }
 
+void poll_calibrate () {
+  byte i;
+
+  for (i = 0; i < special_button_count; i++) {
+    special_button_states_old[i] = special_button_states[i];
+    byte pin = special_button_pins[i];
+    if (pin == 0) continue;
+
+    byte button_state = digitalRead(pin);
+    set_special_button_state(i, button_state);
+  }
+
+  for (i = 0; i < axis_count; i++) {
+    axis_states_old[i] = axis_states_raw[i];
+    int16_t axis_state_raw = analogRead(axis_pins[i]);
+    float axis_state_raw_mapped = map_range(axis_state_raw, 0.0, 4095.0, -1.0, 1.0);
+    axis_states_raw[i] = axis_state_raw_mapped;
+    set_axis_calibrate(i, axis_state_raw_mapped);
+  }
+
+  if (
+    special_button_states[SELECT_KEY] == LOW &&
+    special_button_states_old[SELECT_KEY] == HIGH
+  ) {
+    byte count = 0;
+
+    for (i = 0; i < axis_count; i++) {
+      preferences.putFloat(axis_min_names[i], axis_min[i]);
+      preferences.putFloat(axis_max_names[i], axis_max[i]);
+
+      #ifdef DEBUG
+        Serial.print("axis " + String(i) + " min: " + String(axis_min[i]) + ", max: " + String(axis_max[i]) + "\n");
+      #endif
+    }
+    #ifdef DEBUG
+      Serial.print("calibration done");
+    #endif
+
+    delay(500);
+    ESP.restart();
+  }
+}
+
 void poll () {
   // Bluetooth not connected
   if (!ble_gamepad.isConnected()) {
-    if (is_connected) { // was previously connected (is disconnected)
+    if (IS_CONNECTED) { // was previously connected (is disconnected)
       #ifdef DEBUG
         Serial.print("bluetooth disconnected\n");
       #endif
       digitalWrite(LED_PIN, HIGH);
       led_interval.start();
-      is_connected = false;
+      IS_CONNECTED = false;
     }
     return;
   }
@@ -441,16 +543,16 @@ void poll () {
   byte i;
 
   // Bluetooth connected
-  if (!is_connected) {
+  if (!IS_CONNECTED) {
     #ifdef DEBUG
       Serial.print("bluetooth connected\n");
     #endif
     reset_inputs();
 
     led_interval.stop();
-    digitalWrite(LED_PIN, led_state = LOW);
+    digitalWrite(LED_PIN, LED_STATE = LOW);
 
-    is_connected = true;
+    IS_CONNECTED = true;
   }
 
   // BUTTONS
@@ -507,10 +609,10 @@ void poll () {
   for (i = 0; i < axis_count; i++) {
     axis_states_old[i] = axis_states[i];
     int16_t axis_state_raw = analogRead(axis_pins[i]);
-    float axis_state_mapped = map_range(axis_state_raw, 0.0, 4095.0, -1.0, 1.0);
-    axis_states_raw[i] = axis_state_mapped;
+    float axis_state_raw_mapped = map_range(axis_state_raw, 0.0, 4095.0, -1.0, 1.0);
+    axis_states_raw[i] = axis_state_raw_mapped;
 
-    set_axis_state(i, axis_state_mapped);
+    set_axis_state(i, axis_state_raw_mapped);
   }
 
   // change
@@ -519,13 +621,10 @@ void poll () {
     if (button_states_old[i] != button_states[i]) {
       changed = true;
       #ifdef DEBUG
-        Serial.print("button ");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(button_states_old[i]);
-        Serial.print(" -> ");
-        Serial.print(button_states[i]);
-        Serial.print("\n");
+        Serial.print(
+          "button " + String(i) + ": " + button_states_old[i] +
+          " -> " + button_states[i] + "\n"
+        );
       #else
         break;
       #endif
@@ -536,13 +635,10 @@ void poll () {
     if (special_button_states_old[i] != special_button_states[i]) {
       changed = true;
       #ifdef DEBUG
-        Serial.print("special button ");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(special_button_states_old[i]);
-        Serial.print(" -> ");
-        Serial.print(special_button_states[i]);
-        Serial.print("\n");
+        Serial.print(
+          "special button " + String(i) + ": " + String(special_button_states_old[i]) +
+          " -> " + String(special_button_states[i]) + "\n"
+        );
       #else
         break;
       #endif
@@ -552,16 +648,12 @@ void poll () {
   for (i = 0; i < axis_count; i++) {
     if (axis_states_old[i] != axis_states[i]) {
       changed = true;
-      #ifdef DEBUG
-        Serial.print("axis ");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(axis_states_old[i]);
-        Serial.print(" -> ");
-        Serial.print(axis_states[i]);
-        Serial.print(" raw: ");
-        Serial.print(axis_states_raw[i]);
-        Serial.print("\n");
+      #ifdef DEBUG_AXIS
+        Serial.print(
+          "axis " + String(i) + ": " + String(axis_states_old[i]) +
+          " -> " + String(axis_states[i]) +
+          ", raw: " + String(axis_states_raw[i]) + "\n"
+        );
       #else
         break;
       #endif
