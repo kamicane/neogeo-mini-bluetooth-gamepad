@@ -11,11 +11,6 @@ const float DEADZONE = 0.20;
 const uint SLEEP_TIMEOUT = 5; // minutes
 const uint SLEEP_BUTTON_TIMEOUT = 5; // seconds
 
-/* ble */
-
-const uint16_t BLE_AXIS_MIN = 0;
-const uint16_t BLE_AXIS_MAX = 2048;
-
 /* pins */
 
 const byte AXIS_X_PIN = 34;
@@ -35,6 +30,9 @@ const byte LED_PIN = 22;
 // #define DEBUG_AXIS 1
 
 // end config
+
+const uint16_t BLE_AXIS_MIN = 0;
+const uint16_t BLE_AXIS_MAX = 4095;
 
 const uint axis_count = 2;
 
@@ -60,17 +58,17 @@ const byte BUTTON_START_INDEX = 4;
 const byte BUTTON_SELECT_INDEX = 5;
 const byte BUTTON_MENU_INDEX = 6;
 
-const byte BUTTON_PIN_VIRTUAL = 255;
+const byte INPUT_VIRTUAL = 255;
 const byte BUTTON_TYPE_NORMAL = 0;
-const byte BUTTON_TYPE_SPECIAL = 0;
+const byte BUTTON_TYPE_SPECIAL = 1;
 
-const byte button_count = 7;
-const byte buttons[] = { BUTTON_1, BUTTON_2, BUTTON_3, BUTTON_4, START_BUTTON, SELECT_BUTTON, HOME_BUTTON };
-const char * button_names[] = { "A", "B", "C", "D", "START", "SELECT", "HOME" };
-byte button_states[] = { HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH };
-const byte button_pins[] = { BUTTON_A_PIN, BUTTON_B_PIN, BUTTON_C_PIN, BUTTON_D_PIN, BUTTON_START_PIN, BUTTON_SELECT_PIN, 0 };
-const byte button_types[] = { BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_SPECIAL, BUTTON_TYPE_SPECIAL, BUTTON_TYPE_SPECIAL };
-const byte button_pin_types[] = { INPUT, INPUT, INPUT, INPUT, INPUT_PULLUP, INPUT_PULLUP, BUTTON_PIN_VIRTUAL };
+const byte button_count = 6;
+const byte buttons[] = { BUTTON_1, BUTTON_2, BUTTON_3, BUTTON_4, START_BUTTON, SELECT_BUTTON };
+const char * button_names[] = { "A", "B", "C", "D", "START", "SELECT" };
+byte button_states[] = { HIGH, HIGH, HIGH, HIGH, HIGH, HIGH };
+const byte button_pins[] = { BUTTON_A_PIN, BUTTON_B_PIN, BUTTON_C_PIN, BUTTON_D_PIN, BUTTON_START_PIN, BUTTON_SELECT_PIN };
+const byte button_types[] = { BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_SPECIAL, BUTTON_TYPE_SPECIAL };
+const byte button_input_types[] = { INPUT, INPUT, INPUT, INPUT, INPUT_PULLUP, INPUT_PULLUP };
 
 float axis_states_old[axis_count];
 float axis_states_raw[axis_count];
@@ -84,6 +82,98 @@ bool CALIBRATION_MODE = false;
 
 BleGamepad ble_gamepad("Neo Geo Mini Gamepad", "SNK", 100);
 BleGamepadConfiguration ble_gamepad_cfg;
+
+void configure_ble_gamepad () {
+  ble_gamepad_cfg.setAutoReport(false);
+  ble_gamepad_cfg.setControllerType(CONTROLLER_TYPE_GAMEPAD);
+
+  byte i = 0;
+
+  byte normal_button_count = 0;
+  byte special_button_count = 0;
+
+  for (i = 0; i < button_count; i++) {
+    if (button_input_types[i] != INPUT_VIRTUAL) pinMode(button_pins[i], button_input_types[i]);
+    if (button_types[i] == BUTTON_TYPE_NORMAL) {
+      normal_button_count++;
+    } else if (button_types[i] == BUTTON_TYPE_SPECIAL) {
+      special_button_count++;
+
+      byte button = buttons[i];
+
+      switch (button) {
+        case START_BUTTON:
+          ble_gamepad_cfg.setIncludeStart(true);
+          break;
+        case SELECT_BUTTON:
+          ble_gamepad_cfg.setIncludeSelect(true);
+          break;
+        case HOME_BUTTON:
+          ble_gamepad_cfg.setIncludeHome(true);
+          break;
+        case BACK_BUTTON:
+          ble_gamepad_cfg.setIncludeBack(true);
+          break;
+        case MENU_BUTTON:
+          ble_gamepad_cfg.setIncludeMenu(true);
+          break;
+      }
+    }
+  }
+
+  #ifdef DEBUG
+    Serial.print(String(normal_button_count) + " buttons, " + String(special_button_count) + " special buttons\n");
+  #endif
+
+  ble_gamepad_cfg.setButtonCount(normal_button_count);
+
+  ble_gamepad_cfg.setWhichAxes(false, false, false, false, false, false, false, false);
+
+  for (i = 0; i < axis_count; i++) {
+    pinMode(axis_pins[i], INPUT);
+
+    byte axis = axes[i];
+
+    switch (axis) {
+      case X_AXIS:
+        ble_gamepad_cfg.setIncludeXAxis(true);
+        break;
+
+      case Y_AXIS:
+        ble_gamepad_cfg.setIncludeYAxis(true);
+        break;
+
+      case Z_AXIS:
+        ble_gamepad_cfg.setIncludeZAxis(true);
+        break;
+
+      case RX_AXIS:
+        ble_gamepad_cfg.setIncludeRxAxis(true);
+        break;
+
+      case RY_AXIS:
+        ble_gamepad_cfg.setIncludeRyAxis(true);
+        break;
+
+      case RZ_AXIS:
+        ble_gamepad_cfg.setIncludeRzAxis(true);
+        break;
+
+      case SLIDER1:
+        ble_gamepad_cfg.setIncludeSlider1(true);
+        break;
+
+      case SLIDER2:
+        ble_gamepad_cfg.setIncludeSlider2(true);
+        break;
+    }
+  }
+
+  ble_gamepad_cfg.setAxesMin(BLE_AXIS_MIN); // 0 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
+  ble_gamepad_cfg.setAxesMax(BLE_AXIS_MAX); // 32767 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
+
+  ble_gamepad_cfg.setHatSwitchCount(1);
+}
 
 Preferences preferences;
 
@@ -273,34 +363,7 @@ void setup () {
 
   byte i;
 
-  for (i = 0; i < button_count; i++) {
-    if (button_pin_types[i] != BUTTON_PIN_VIRTUAL) pinMode(button_pins[i], button_pin_types[i]);
-    if (button_types[i] == BUTTON_TYPE_SPECIAL) {
-      byte button = buttons[i];
-
-      switch (button) {
-        case START_BUTTON:
-          ble_gamepad_cfg.setIncludeStart(true);
-          break;
-        case SELECT_BUTTON:
-          ble_gamepad_cfg.setIncludeSelect(true);
-          break;
-        case HOME_BUTTON:
-          ble_gamepad_cfg.setIncludeHome(true);
-          break;
-        case BACK_BUTTON:
-          ble_gamepad_cfg.setIncludeBack(true);
-          break;
-        case MENU_BUTTON:
-          ble_gamepad_cfg.setIncludeMenu(true);
-          break;
-      }
-    }
-  }
-
-  for (i = 0; i < axis_count; i++) {
-    pinMode(axis_pins[i], INPUT);
-  }
+  configure_ble_gamepad();
 
   pinMode(LED_PIN, OUTPUT);
 
@@ -309,32 +372,13 @@ void setup () {
     #ifdef DEBUG
       Serial.print("calibration mode\n");
     #endif
+  } else if (digitalRead(BUTTON_A_PIN) == LOW) {
+    DIGITAL_MODE = false;
+  } else if (digitalRead(BUTTON_D_PIN) == LOW) {
+    DIGITAL_MODE = true;
   } else {
-    if (digitalRead(BUTTON_A_PIN) == LOW) {
-      DIGITAL_MODE = false;
-    } else if (digitalRead(BUTTON_D_PIN) == LOW) {
-      DIGITAL_MODE = true;
-    } else {
-      DIGITAL_MODE = preferences.getBool("digital-mode", false);
-    }
-
-    #ifdef DEBUG
-      if (DIGITAL_MODE)
-        Serial.print("digital mode\n");
-      else
-        Serial.print("analog mode\n");
-    #endif
+    DIGITAL_MODE = preferences.getBool("digital-mode", false);
   }
-
-  ble_gamepad_cfg.setAutoReport(false);
-  ble_gamepad_cfg.setControllerType(CONTROLLER_TYPE_GAMEPAD);
-  ble_gamepad_cfg.setButtonCount(button_count);
-
-  ble_gamepad_cfg.setAxesMin(BLE_AXIS_MIN); // 0 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
-  ble_gamepad_cfg.setAxesMax(BLE_AXIS_MAX); // 32767 --> int16_t - 16 bit signed integer - Can be in decimal or hexadecimal
-
-  ble_gamepad_cfg.setHatSwitchCount(1);
-  ble_gamepad_cfg.setWhichAxes(true, true, false, false, false, false, false, false);
 
   esp_sleep_enable_ext0_wakeup((gpio_num_t)BUTTON_START_PIN, LOW);
 
@@ -362,6 +406,13 @@ void setup () {
         );
       #endif
     }
+
+    #ifdef DEBUG
+      if (DIGITAL_MODE)
+        Serial.print("digital mode\n");
+      else
+        Serial.print("analog mode\n");
+    #endif
 
     ble_gamepad.begin(&ble_gamepad_cfg);
 
@@ -417,7 +468,7 @@ void poll_calibrate () {
 
   for (i = 0; i < button_count; i++) {
     button_states_old[i] = button_states[i];
-    if (button_pin_types[i] == BUTTON_PIN_VIRTUAL) continue;
+    if (button_input_types[i] == INPUT_VIRTUAL) continue;
     byte pin = button_pins[i];
 
     byte button_state = digitalRead(pin);
@@ -456,32 +507,6 @@ void poll_calibrate () {
 }
 
 void poll () {
-  // Bluetooth not connected
-  if (!ble_gamepad.isConnected()) {
-    if (IS_CONNECTED) { // was previously connected (is disconnected)
-      #ifdef DEBUG
-        Serial.print("bluetooth disconnected\n");
-      #endif
-      digitalWrite(LED_PIN, HIGH);
-      led_interval.start();
-      IS_CONNECTED = false;
-    }
-    return;
-  }
-
-  // Bluetooth connected
-  if (!IS_CONNECTED) {
-    #ifdef DEBUG
-      Serial.print("bluetooth connected\n");
-    #endif
-    reset_inputs();
-
-    led_interval.stop();
-    digitalWrite(LED_PIN, LED_STATE = LOW);
-
-    IS_CONNECTED = true;
-  }
-
   byte i;
 
   // BUTTONS
@@ -490,7 +515,7 @@ void poll () {
 
   for (i = 0; i < button_count; i++) {
     button_states_old[i] = button_states[i];
-    if (button_pin_types[i] == BUTTON_PIN_VIRTUAL) continue;
+    if (button_input_types[i] == INPUT_VIRTUAL) continue;
     byte button_state = digitalRead(button_pins[i]);
     set_button_state(i, button_state);
   }
@@ -550,8 +575,33 @@ void poll () {
     sleep_timeout.start();
   }
 
-  // WRITE
-  write_inputs();
+  // Bluetooth not connected
+  if (!ble_gamepad.isConnected()) {
+    if (IS_CONNECTED) { // was previously connected (is disconnected)
+      #ifdef DEBUG
+        Serial.print("bluetooth disconnected\n");
+      #endif
+      digitalWrite(LED_PIN, HIGH);
+      led_interval.start();
+      IS_CONNECTED = false;
+    }
+    return;
+  }
+
+  // Bluetooth connected
+  if (!IS_CONNECTED) {
+    #ifdef DEBUG
+      Serial.print("bluetooth connected\n");
+    #endif
+    reset_inputs();
+
+    led_interval.stop();
+    digitalWrite(LED_PIN, LED_STATE = LOW);
+
+    IS_CONNECTED = true;
+  }
+
+  if (IS_CONNECTED) write_inputs();
 }
 
 void loop () {
