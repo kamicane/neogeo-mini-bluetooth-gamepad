@@ -1,48 +1,49 @@
-// config
-
-#define POLL_RATE 1000 // 1ms
-#define DEADZONE 0.20
-
-#define SLEEP_TIMEOUT 5 // minutes
-#define SLEEP_BUTTON_TIMEOUT 5 // seconds
-
-/* pins */
-
-#define X_AXIS_PIN 34
-#define Y_AXIS_PIN 35
-#define BUTTON_A_PIN 19
-#define BUTTON_B_PIN 23
-#define BUTTON_C_PIN 18
-#define BUTTON_D_PIN 5
-
-#define START_BUTTON_PIN 15
-#define SELECT_BUTTON_PIN 13
-
-#define LED_PIN 22
-
-/* ble */
-
-#define BLE_AXIS_MIN 0
-#define BLE_AXIS_MAX 2048
-
-// #define DEBUG 1
-
-// end config
-
 #include <Arduino.h>
 #include <BleGamepad.h>
 #include <TickTwo.h>
 #include <Preferences.h>
 
-const uint axis_count = 2;
-const uint button_count = 4;
-const uint special_button_count = 3;
+// config
 
-const byte X_AXIS_KEY = 0;
-const byte Y_AXIS_KEY = 1;
+const uint POLL_RATE = 1000; // micros, 1ms
+const float DEADZONE = 0.20;
+
+const uint SLEEP_TIMEOUT = 5; // minutes
+const uint SLEEP_BUTTON_TIMEOUT = 5; // seconds
+
+/* ble */
+
+const uint16_t BLE_AXIS_MIN = 0;
+const uint16_t BLE_AXIS_MAX = 2048;
+
+/* pins */
+
+const byte AXIS_X_PIN = 34;
+const byte AXIS_Y_PIN = 35;
+
+const byte BUTTON_A_PIN = 19;
+const byte BUTTON_B_PIN = 23;
+const byte BUTTON_C_PIN = 18;
+const byte BUTTON_D_PIN = 5;
+
+const byte BUTTON_START_PIN = 15;
+const byte BUTTON_SELECT_PIN = 13;
+
+const byte LED_PIN = 22;
+
+// #define DEBUG 1
+// #define DEBUG_AXIS 1
+
+// end config
+
+const uint axis_count = 2;
+
+const byte AXIS_X_INDEX = 0;
+const byte AXIS_Y_INDEX = 1;
 
 const byte axes[] = { X_AXIS, Y_AXIS };
-const byte axis_pins[] = { X_AXIS_PIN, Y_AXIS_PIN };
+const char * axis_names[] = { "X", "Y" };
+const byte axis_pins[] = { AXIS_X_PIN, AXIS_Y_PIN };
 float axis_states[] = { 0.0, 0.0 };
 
 const char * axis_min_names[] = { "x-axis-min", "y-axis-min" };
@@ -51,36 +52,32 @@ const char * axis_max_names[] = { "x-axis-max", "y-axis-max" };
 float axis_min[] = { -1.0, -1.0 };
 float axis_max[] = { 1.0, 1.0 };
 
-const byte A_KEY = 0;
-const byte B_KEY = 1;
-const byte C_KEY = 2;
-const byte D_KEY = 3;
+const byte BUTTON_A_INDEX = 0;
+const byte BUTTON_B_INDEX = 1;
+const byte BUTTON_C_INDEX = 2;
+const byte BUTTON_D_INDEX = 3;
+const byte BUTTON_START_INDEX = 4;
+const byte BUTTON_SELECT_INDEX = 5;
+const byte BUTTON_MENU_INDEX = 6;
 
-const byte buttons[] = { BUTTON_1, BUTTON_2, BUTTON_3, BUTTON_4 };
-const byte button_pins[] = { BUTTON_A_PIN, BUTTON_B_PIN, BUTTON_C_PIN, BUTTON_D_PIN };
-byte button_states[] = { HIGH, HIGH, HIGH, HIGH };
+const byte BUTTON_PIN_VIRTUAL = 255;
+const byte BUTTON_TYPE_NORMAL = 0;
+const byte BUTTON_TYPE_SPECIAL = 0;
 
-const byte START_KEY = 0;
-const byte SELECT_KEY = 1;
-const byte MENU_KEY = 2;
-
-const byte special_buttons[] = { START_BUTTON, SELECT_BUTTON, HOME_BUTTON };
-const byte special_button_pins[] = { START_BUTTON_PIN, SELECT_BUTTON_PIN, 0 };
-byte special_button_states[] = { HIGH, HIGH, HIGH };
+const byte button_count = 7;
+const byte buttons[] = { BUTTON_1, BUTTON_2, BUTTON_3, BUTTON_4, START_BUTTON, SELECT_BUTTON, HOME_BUTTON };
+const char * button_names[] = { "A", "B", "C", "D", "START", "SELECT", "HOME" };
+byte button_states[] = { HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH };
+const byte button_pins[] = { BUTTON_A_PIN, BUTTON_B_PIN, BUTTON_C_PIN, BUTTON_D_PIN, BUTTON_START_PIN, BUTTON_SELECT_PIN, 0 };
+const byte button_types[] = { BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_NORMAL, BUTTON_TYPE_SPECIAL, BUTTON_TYPE_SPECIAL, BUTTON_TYPE_SPECIAL };
+const byte button_pin_types[] = { INPUT, INPUT, INPUT, INPUT, INPUT_PULLUP, INPUT_PULLUP, BUTTON_PIN_VIRTUAL };
 
 float axis_states_old[axis_count];
 float axis_states_raw[axis_count];
 byte button_states_old[button_count];
-byte special_button_states_old[special_button_count];
 
 bool IS_CONNECTED = false;
 byte LED_STATE = HIGH;
-
-const byte MENU_STATE_WAITING = 0;
-const byte MENU_STATE_LOW = 1;
-const byte MENU_STATE_HIGH = 2;
-const byte MENU_STATE_EXPIRED = 3;
-byte MENU_STATE = MENU_STATE_HIGH;
 
 bool DIGITAL_MODE = false;
 bool CALIBRATION_MODE = false;
@@ -94,19 +91,16 @@ void poll ();
 void poll_calibrate ();
 void toggle_led ();
 void deep_sleep ();
-void delayed_press ();
 
 TickTwo poll_interval(poll, POLL_RATE, 0, MICROS_MICROS);
 TickTwo calibrate_interval(poll_calibrate, POLL_RATE, 0, MICROS_MICROS);
 TickTwo led_interval(toggle_led, 1000, 0); // 1 second
 TickTwo sleep_timeout(deep_sleep, SLEEP_TIMEOUT * 60000, 0);
-TickTwo delayed_press_timeout(delayed_press, 120, 1); // 120ms
 TickTwo button_sleep_timeout(deep_sleep, SLEEP_BUTTON_TIMEOUT * 1000, 1);
 
 void stop_all_timers () {
   poll_interval.stop();
   calibrate_interval.stop();
-  delayed_press_timeout.stop();
   led_interval.stop();
   sleep_timeout.stop();
   button_sleep_timeout.stop();
@@ -115,7 +109,6 @@ void stop_all_timers () {
 void update_all_timers () {
   poll_interval.update();
   calibrate_interval.update();
-  delayed_press_timeout.update();
   led_interval.update();
   sleep_timeout.update();
   button_sleep_timeout.update();
@@ -133,45 +126,29 @@ float map_range (float value, float old_min, float old_max, float new_min, float
 // https://github.com/Minimuino/thumbstick-deadzones
 
 float dz_scaled_radial (float input) {
-  float input_abs = abs(input);
+  const float input_abs = abs(input);
   if (input_abs < DEADZONE) {
     return 0.0;
   }
 
-  float sign = input / input_abs;
+  const float sign = input / input_abs;
 
   return sign * map_range(input_abs, DEADZONE, 1.0, 0.0, 1.0);
 }
 
-void delayed_press () {
-  MENU_STATE = MENU_STATE_EXPIRED;
-}
-
 void write_button (byte i, byte state) {
-  byte button = buttons[i];
+  const byte button = buttons[i];
   if (state == LOW) {
-    ble_gamepad.press(button);
+    if (button_types[i] == BUTTON_TYPE_SPECIAL) ble_gamepad.pressSpecialButton(button);
+    else ble_gamepad.press(button);
   } else {
-    ble_gamepad.release(button);
+    if (button_types[i] == BUTTON_TYPE_SPECIAL) ble_gamepad.releaseSpecialButton(button);
+    else ble_gamepad.release(button);
   }
 }
 
 void set_button_state (byte i, byte state) {
   button_states[i] = state;
-}
-
-void write_special_button (byte i, byte state) {
-  byte button = special_buttons[i];
-
-  if (state == LOW) {
-    ble_gamepad.pressSpecialButton(button);
-  } else {
-    ble_gamepad.releaseSpecialButton(button);
-  }
-}
-
-void set_special_button_state (byte i, byte state) {
-  special_button_states[i] = state;
 }
 
 byte compute_dpad_value (bool dpad_up, bool dpad_right, bool dpad_down, bool dpad_left) {
@@ -233,13 +210,13 @@ byte adc (float x, float y) {
 }
 
 void write_axis_dpad (float x_state, float y_state) {
-  byte dpad_value = adc(x_state, y_state);
+  const byte dpad_value = adc(x_state, y_state);
   ble_gamepad.setHat(dpad_value);
 }
 
 void write_axis (byte i, float state) {
-  byte axis = axes[i];
-  int16_t state_ble = map_range(state, -1.0, 1.0, BLE_AXIS_MIN, BLE_AXIS_MAX);
+  const byte axis = axes[i];
+  const int16_t state_ble = map_range(state, -1.0, 1.0, BLE_AXIS_MIN, BLE_AXIS_MAX);
 
   switch (axis) {
     case X_AXIS:
@@ -255,13 +232,13 @@ void write_axis (byte i, float state) {
 void set_axis_calibrate (byte i, float state) {
   if (state > axis_max[i]) {
     #ifdef DEBUG
-      Serial.print("axis " + String(i) + " new max: " + String(state) + "\n");
+      Serial.print(String(axis_names[i]) + " new max: " + String(state) + "\n");
     #endif
     axis_max[i] = state;
   }
   else if (state < axis_min[i]) {
     #ifdef DEBUG
-      Serial.print("axis " + String(i) + " new min: " + String(state) + "\n");
+      Serial.print(String(axis_names[i]) + " new min: " + String(state) + "\n");
     #endif
     axis_min[i] = state;
   }
@@ -281,9 +258,6 @@ void reset_inputs () {
   for (i = 0; i < button_count; i++) {
     set_button_state(i, HIGH);
   }
-  for (i = 0; i < special_button_count; i++) {
-    set_special_button_state(i, HIGH);
-  }
   for (i = 0; i < axis_count; i++) {
     set_axis_state(i, 0.0);
   }
@@ -300,29 +274,27 @@ void setup () {
   byte i;
 
   for (i = 0; i < button_count; i++) {
-    pinMode(button_pins[i], INPUT);
-  }
+    if (button_pin_types[i] != BUTTON_PIN_VIRTUAL) pinMode(button_pins[i], button_pin_types[i]);
+    if (button_types[i] == BUTTON_TYPE_SPECIAL) {
+      byte button = buttons[i];
 
-  for (i = 0; i < special_button_count; i++) {
-    byte pin = special_button_pins[i];
-    if (pin != 0) pinMode(special_button_pins[i], INPUT_PULLUP);
-    byte button = special_buttons[i];
-    switch (button) {
-      case START_BUTTON:
-        ble_gamepad_cfg.setIncludeStart(true);
-        break;
-      case SELECT_BUTTON:
-        ble_gamepad_cfg.setIncludeSelect(true);
-        break;
-      case HOME_BUTTON:
-        ble_gamepad_cfg.setIncludeHome(true);
-        break;
-      case BACK_BUTTON:
-        ble_gamepad_cfg.setIncludeBack(true);
-        break;
-      case MENU_BUTTON:
-        ble_gamepad_cfg.setIncludeMenu(true);
-        break;
+      switch (button) {
+        case START_BUTTON:
+          ble_gamepad_cfg.setIncludeStart(true);
+          break;
+        case SELECT_BUTTON:
+          ble_gamepad_cfg.setIncludeSelect(true);
+          break;
+        case HOME_BUTTON:
+          ble_gamepad_cfg.setIncludeHome(true);
+          break;
+        case BACK_BUTTON:
+          ble_gamepad_cfg.setIncludeBack(true);
+          break;
+        case MENU_BUTTON:
+          ble_gamepad_cfg.setIncludeMenu(true);
+          break;
+      }
     }
   }
 
@@ -332,25 +304,25 @@ void setup () {
 
   pinMode(LED_PIN, OUTPUT);
 
-  if (digitalRead(BUTTON_A_PIN) == LOW) {
-    DIGITAL_MODE = false;
-  } else if (digitalRead(BUTTON_D_PIN) == LOW) {
-    DIGITAL_MODE = true;
-  } else {
-    DIGITAL_MODE = preferences.getBool("digital-mode", false);
-  }
-
-  #ifdef DEBUG
-    if (DIGITAL_MODE)
-      Serial.print("digital mode\n");
-    else
-      Serial.print("analog mode\n");
-  #endif
-
   if (digitalRead(BUTTON_C_PIN) == LOW) {
     CALIBRATION_MODE = true;
     #ifdef DEBUG
-      Serial.print("CALIBRATION MODE\n");
+      Serial.print("calibration mode\n");
+    #endif
+  } else {
+    if (digitalRead(BUTTON_A_PIN) == LOW) {
+      DIGITAL_MODE = false;
+    } else if (digitalRead(BUTTON_D_PIN) == LOW) {
+      DIGITAL_MODE = true;
+    } else {
+      DIGITAL_MODE = preferences.getBool("digital-mode", false);
+    }
+
+    #ifdef DEBUG
+      if (DIGITAL_MODE)
+        Serial.print("digital mode\n");
+      else
+        Serial.print("analog mode\n");
     #endif
   }
 
@@ -364,7 +336,7 @@ void setup () {
   ble_gamepad_cfg.setHatSwitchCount(1);
   ble_gamepad_cfg.setWhichAxes(true, true, false, false, false, false, false, false);
 
-  esp_sleep_enable_ext0_wakeup((gpio_num_t)START_BUTTON_PIN, LOW);
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)BUTTON_START_PIN, LOW);
 
   reset_inputs();
 
@@ -384,7 +356,7 @@ void setup () {
       axis_max[i] = preferences.getFloat(axis_max_names[i], 1.0);
 
       #ifdef DEBUG
-        Serial.print("axis " + String(i) +
+        Serial.print(String(axis_names[i]) +
           " min: " + String(axis_min[i]) +
           ", max: " + String(axis_max[i]) + "\n"
         );
@@ -409,11 +381,8 @@ void write_inputs () {
   for (i = 0; i < button_count; i++) {
     write_button(i, button_states[i]);
   }
-  for (i = 0; i < special_button_count; i++) {
-    write_special_button(i, special_button_states[i]);
-  }
   if (DIGITAL_MODE) {
-    write_axis_dpad(axis_states[X_AXIS_KEY], axis_states[Y_AXIS_KEY]);
+    write_axis_dpad(axis_states[AXIS_X_INDEX], axis_states[AXIS_Y_INDEX]);
     for (i = 0; i < axis_count; i++) {
       write_axis(i, 0.0);
     }
@@ -443,54 +412,16 @@ void deep_sleep () {
   esp_deep_sleep_start();
 }
 
-void handle_soft_menu () {
-  byte start_state = special_button_states[START_KEY];
-  byte select_state = special_button_states[SELECT_KEY];
-
-  if (MENU_STATE == MENU_STATE_LOW) {
-    if (start_state == HIGH && select_state == HIGH) {
-      MENU_STATE = MENU_STATE_HIGH;
-      set_special_button_state(MENU_KEY, HIGH);
-    }
-  }
-
-  if (MENU_STATE == MENU_STATE_HIGH) {
-    if (start_state == LOW || select_state == LOW) {
-      MENU_STATE = MENU_STATE_WAITING;
-      delayed_press_timeout.start();
-    }
-  }
-
-  if (MENU_STATE == MENU_STATE_WAITING) {
-    if (start_state == LOW && select_state == LOW) {
-      MENU_STATE = MENU_STATE_LOW;
-      delayed_press_timeout.stop();
-      set_special_button_state(MENU_KEY, LOW);
-    }
-  }
-
-  if (MENU_STATE == MENU_STATE_WAITING || MENU_STATE == MENU_STATE_LOW) {
-    set_special_button_state(START_KEY, HIGH);
-    set_special_button_state(SELECT_KEY, HIGH);
-  }
-
-  if (MENU_STATE == MENU_STATE_EXPIRED) {
-    if (start_state == HIGH && select_state == HIGH) {
-      MENU_STATE = MENU_STATE_HIGH;
-    }
-  }
-}
-
 void poll_calibrate () {
   byte i;
 
-  for (i = 0; i < special_button_count; i++) {
-    special_button_states_old[i] = special_button_states[i];
-    byte pin = special_button_pins[i];
-    if (pin == 0) continue;
+  for (i = 0; i < button_count; i++) {
+    button_states_old[i] = button_states[i];
+    if (button_pin_types[i] == BUTTON_PIN_VIRTUAL) continue;
+    byte pin = button_pins[i];
 
     byte button_state = digitalRead(pin);
-    set_special_button_state(i, button_state);
+    set_button_state(i, button_state);
   }
 
   for (i = 0; i < axis_count; i++) {
@@ -502,8 +433,8 @@ void poll_calibrate () {
   }
 
   if (
-    special_button_states[SELECT_KEY] == LOW &&
-    special_button_states_old[SELECT_KEY] == HIGH
+    button_states[BUTTON_SELECT_INDEX] == LOW &&
+    button_states_old[BUTTON_SELECT_INDEX] == HIGH
   ) {
     byte count = 0;
 
@@ -512,11 +443,11 @@ void poll_calibrate () {
       preferences.putFloat(axis_max_names[i], axis_max[i]);
 
       #ifdef DEBUG
-        Serial.print("axis " + String(i) + " min: " + String(axis_min[i]) + ", max: " + String(axis_max[i]) + "\n");
+        Serial.print(String(axis_names[i]) + " min: " + String(axis_min[i]) + ", max: " + String(axis_max[i]) + "\n");
       #endif
     }
     #ifdef DEBUG
-      Serial.print("calibration done");
+      Serial.print("calibration done\n");
     #endif
 
     delay(500);
@@ -538,8 +469,6 @@ void poll () {
     return;
   }
 
-  byte i;
-
   // Bluetooth connected
   if (!IS_CONNECTED) {
     #ifdef DEBUG
@@ -553,53 +482,25 @@ void poll () {
     IS_CONNECTED = true;
   }
 
+  byte i;
+
   // BUTTONS
 
   bool changed = false;
 
   for (i = 0; i < button_count; i++) {
     button_states_old[i] = button_states[i];
+    if (button_pin_types[i] == BUTTON_PIN_VIRTUAL) continue;
     byte button_state = digitalRead(button_pins[i]);
     set_button_state(i, button_state);
   }
 
-  // START, SELECT
-
-  for (i = 0; i < special_button_count; i++) {
-    special_button_states_old[i] = special_button_states[i];
-    byte pin = special_button_pins[i];
-    if (pin == 0) continue;
-
-    byte button_state = digitalRead(pin);
-    set_special_button_state(i, button_state);
-  }
-
-  // MENU
-
-  handle_soft_menu();
-
   // FORCE SLEEP
 
-  if (special_button_states[SELECT_KEY] == LOW) {
+  if (button_states[BUTTON_SELECT_INDEX] == LOW) {
     if (button_sleep_timeout.state() != RUNNING) button_sleep_timeout.start();
   } else {
     button_sleep_timeout.stop();
-  }
-
-  // TOGGLE DIGITAL MODE
-  if (
-    special_button_states[SELECT_KEY] == LOW &&
-    button_states[D_KEY] == LOW &&
-    (
-      button_states_old[D_KEY] == HIGH ||
-      special_button_states_old[SELECT_KEY] == HIGH
-    )
-  ) {
-    DIGITAL_MODE = !DIGITAL_MODE;
-    #ifdef DEBUG
-      if (DIGITAL_MODE) Serial.print("digital mode enabled\n");
-      else Serial.print("digital mode disabled\n");
-    #endif
   }
 
   // AXES
@@ -620,22 +521,8 @@ void poll () {
       changed = true;
       #ifdef DEBUG
         Serial.print(
-          "button " + String(i) + ": " + button_states_old[i] +
+          String(button_names[i]) + ": " + button_states_old[i] +
           " -> " + button_states[i] + "\n"
-        );
-      #else
-        break;
-      #endif
-    }
-  }
-
-  for (i = 0; i < special_button_count; i++) {
-    if (special_button_states_old[i] != special_button_states[i]) {
-      changed = true;
-      #ifdef DEBUG
-        Serial.print(
-          "special button " + String(i) + ": " + String(special_button_states_old[i]) +
-          " -> " + String(special_button_states[i]) + "\n"
         );
       #else
         break;
@@ -648,7 +535,7 @@ void poll () {
       changed = true;
       #ifdef DEBUG_AXIS
         Serial.print(
-          "axis " + String(i) + ": " + String(axis_states_old[i]) +
+          String(axis_names[i]) + ": " + String(axis_states_old[i]) +
           " -> " + String(axis_states[i]) +
           ", raw: " + String(axis_states_raw[i]) + "\n"
         );

@@ -9,4 +9,3 @@ Bluetooth conversion of the Neogeo mini gamepad
 - auto sleep
 - manual sleep
 - automatic analog stick calibration
-- properly implemented software menu button
