@@ -8,7 +8,7 @@ Uses [ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad) to do 
 
 ## Features
 
-- Analog joysticks with [scaled radial deadzone](https://github.com/Minimuino/thumbstick-deadzones)
+- Real analog joystick with [scaled radial deadzone](https://github.com/Minimuino/thumbstick-deadzones). Unlike the original controller the output is actually analog
 - optional selectable digital mode with [eight symmetric angular zones](https://gamingprojects.wordpress.com/2017/08/04/converting-analog-joystick-to-digital-joystick-signals/)
 - auto sleep
 - manual sleep
