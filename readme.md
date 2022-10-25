@@ -9,10 +9,10 @@ Uses [ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad) to do 
 ## Features
 
 - Real analog joystick with [scaled radial deadzone](https://github.com/Minimuino/thumbstick-deadzones). Unlike the original controller the output is actually analog
-- optional selectable digital mode with [eight symmetric angular zones](https://gamingprojects.wordpress.com/2017/08/04/converting-analog-joystick-to-digital-joystick-signals/)
-- auto sleep
-- manual sleep
-- analog stick calibration
+- Optional selectable digital mode with [eight symmetric angular zones](https://gamingprojects.wordpress.com/2017/08/04/converting-analog-joystick-to-digital-joystick-signals/)
+- Auto sleep
+- Manual sleep
+- Analog stick calibration
 
 ## Usage
 
@@ -54,6 +54,7 @@ Uses [ESP32-BLE-Gamepad](https://github.com/lemmingDev/ESP32-BLE-Gamepad) to do 
 
 - Disassembled the controller, trimmed the shell (look in [/img](/img))
 - Desoldered almost all of the components from the NeoGeo pcb to avoid the original encoder getting powered up and consuming battery or interfering with inputs. I kept the 4 pull up resistors that are connected to A B C D and the capacitors that are used to filter the analog stick signals
+- Trimmed the analog stick pins flush to make more space for the battery
 - Desoldered the battery connector from the Esp32 since it's too tall otherwise
 - Soldered all the input pins using the test pads to the Esp32. The A B C D test pads are located under the Esp32. The start button needs to be an RTCIO pin as it will be used to wake the Esp32 from sleep
 - Taped the Esp32 to the back of the NeoGeo pcb
