@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <TickTwo.h>
 
-#include "joy_util.h"
+#include <BluJoy.h>
 
 /* config */
 
@@ -31,7 +31,7 @@ const byte LED_PIN = 22;
 
 /* end config */
 
-JoyUtil joy("Neogeo Mini Gamepad", "SNK", DEADZONE);
+BluJoy joy("Neogeo Mini Gamepad", "SNK", DEADZONE);
 
 bool IS_BLE_CONNECTED = false;
 bool IS_CLASSIC_CONNECTED = false;
@@ -82,29 +82,29 @@ void update_core1_timers () {
 }
 
 float map_axis_value (uint16_t axis_state_raw) {
-  return JoyUtil::map_range(axis_state_raw, 0.0, 4095.0, -1.0, 1.0);
+  return BluJoy::map_range(axis_state_raw, 0.0, 4095.0, -1.0, 1.0);
 }
 
 void read_dpad () {
   joy.set_dpad_analog_state(
-    JoyUtil::AXIS_LX, JoyUtil::AXIS_LY,
+    BluJoy::AXIS_LX, BluJoy::AXIS_LY,
     map_axis_value(analogRead(AXIS_X_PIN)), map_axis_value(analogRead(AXIS_Y_PIN))
   );
 }
 
 void read_buttons () {
-  joy.set_button_state(JoyUtil::BUTTON_A, digitalRead(BUTTON_A_PIN));
-  joy.set_button_state(JoyUtil::BUTTON_B, digitalRead(BUTTON_B_PIN));
-  joy.set_button_state(JoyUtil::BUTTON_X, digitalRead(BUTTON_C_PIN));
-  joy.set_button_state(JoyUtil::BUTTON_Y, digitalRead(BUTTON_D_PIN));
+  joy.set_button_state(BluJoy::BUTTON_A, digitalRead(BUTTON_A_PIN));
+  joy.set_button_state(BluJoy::BUTTON_B, digitalRead(BUTTON_B_PIN));
+  joy.set_button_state(BluJoy::BUTTON_X, digitalRead(BUTTON_C_PIN));
+  joy.set_button_state(BluJoy::BUTTON_Y, digitalRead(BUTTON_D_PIN));
 
-  joy.set_button_state(JoyUtil::BUTTON_START, digitalRead(BUTTON_START_PIN));
-  joy.set_button_state(JoyUtil::BUTTON_SELECT, digitalRead(BUTTON_SELECT_PIN));
+  joy.set_button_state(BluJoy::BUTTON_START, digitalRead(BUTTON_START_PIN));
+  joy.set_button_state(BluJoy::BUTTON_SELECT, digitalRead(BUTTON_SELECT_PIN));
 }
 
 void read_axes () {
-  joy.set_axis_state(JoyUtil::AXIS_LX, map_axis_value(analogRead(AXIS_X_PIN)));
-  joy.set_axis_state(JoyUtil::AXIS_LY, map_axis_value(analogRead(AXIS_Y_PIN)));
+  joy.set_axis_state(BluJoy::AXIS_LX, map_axis_value(analogRead(AXIS_X_PIN)));
+  joy.set_axis_state(BluJoy::AXIS_LY, map_axis_value(analogRead(AXIS_Y_PIN)));
 }
 
 #ifdef JOY_DEBUG
@@ -148,10 +148,10 @@ void start () {
       Serial.print("analog mode\n");
     #endif
 
-    joy.prefs_read();
+    joy.read_calibration_data();
 
     #ifdef JOY_DEBUG
-    for (byte axis = 0; axis < JoyUtil::AXIS_COUNT; axis++) {
+    for (byte axis = 0; axis < BluJoy::AXIS_COUNT; axis++) {
       Serial.print(String(joy.axis_names[axis]) +
         " min: " + String(joy.get_axis_min(axis)) +
         ", mid: " + String(joy.get_axis_mid(axis)) +
@@ -228,7 +228,7 @@ void report_calibrate () {
   read_buttons();
   read_axes();
 
-  byte special_btn_state_new = joy.get_button_state(JoyUtil::BUTTON_SELECT);
+  byte special_btn_state_new = joy.get_button_state(BluJoy::BUTTON_SELECT);
   bool special_pressed = special_btn_state_old == HIGH && special_btn_state_new == LOW;
   special_btn_state_old = special_btn_state_new;
 
@@ -256,10 +256,10 @@ void report_calibrate () {
       Serial.print("now move all axes full range then press select\n");
       #endif
     } else {
-      joy.prefs_write();
+      joy.write_calibration_data();
 
       #ifdef JOY_DEBUG
-      for (byte axis = 0; axis < JoyUtil::AXIS_COUNT; axis++) {
+      for (byte axis = 0; axis < BluJoy::AXIS_COUNT; axis++) {
         Serial.print(
           String(joy.axis_names[axis]) +
           " min: " + String(joy.get_axis_min(axis)) +
@@ -321,7 +321,7 @@ void report () {
 
   // FORCE SLEEP
 
-  if (joy.get_button_state(JoyUtil::BUTTON_SELECT) == LOW) {
+  if (joy.get_button_state(BluJoy::BUTTON_SELECT) == LOW) {
     if (button_sleep_timeout.state() != RUNNING) button_sleep_timeout.start();
   } else {
     button_sleep_timeout.stop();
@@ -337,16 +337,16 @@ void report () {
 
 #ifdef JOY_DEBUG
 void debug_common () {
-  for (byte btn = 0; btn < JoyUtil::BUTTON_COUNT; btn++) {
-    const std::string spacer = (btn < JoyUtil::BUTTON_COUNT - 1) ? ", " : "";
+  for (byte btn = 0; btn < BluJoy::BUTTON_COUNT; btn++) {
+    const std::string spacer = (btn < BluJoy::BUTTON_COUNT - 1) ? ", " : "";
     Serial.print(
       String(joy.button_names[btn]) +
       ": " + String(joy.get_button_state(btn)) + spacer.c_str()
     );
   }
   Serial.print(" :: ");
-  for (byte axis = 0; axis < JoyUtil::AXIS_COUNT; axis++) {
-    const std::string spacer = (axis < JoyUtil::AXIS_COUNT - 1) ? ", " : "";
+  for (byte axis = 0; axis < BluJoy::AXIS_COUNT; axis++) {
+    const std::string spacer = (axis < BluJoy::AXIS_COUNT - 1) ? ", " : "";
     Serial.print(
       String(joy.axis_names[axis]) +
       ": " + String(joy.get_axis_state(axis)) + "(" + String(joy.get_axis_state_raw(axis)) + ")" + spacer.c_str()
