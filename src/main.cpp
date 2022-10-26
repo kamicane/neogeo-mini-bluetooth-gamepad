@@ -8,6 +8,7 @@
 // #define JOY_DEBUG 1
 
 const uint REPORT_RATE = 1000; // micros, 1ms
+const uint POLL_RATE = 1000; // micros
 
 const float DEADZONE = 0.20;
 
@@ -32,6 +33,7 @@ const byte LED_PIN = 22;
 /* end config */
 
 BluJoy joy("Neogeo Mini Gamepad", "SNK", DEADZONE);
+TaskHandle_t core0_handle;
 
 bool IS_BLE_CONNECTED = false;
 bool IS_CLASSIC_CONNECTED = false;
@@ -46,6 +48,7 @@ void report_calibrate ();
 void toggle_led ();
 void deep_sleep ();
 void ble_conn_check ();
+void poll ();
 
 #ifdef JOY_DEBUG
 void debug_common ();
@@ -53,6 +56,7 @@ TickTwo debug_interval(debug_common, 1000, 0); // 1 second
 #endif
 
 TickTwo report_interval(report, REPORT_RATE, 0, MICROS_MICROS);
+TickTwo poll_interval(poll, POLL_RATE, 0, MICROS_MICROS);
 TickTwo ble_conn_check_interval(ble_conn_check, 1000, 0); // 1 second
 TickTwo calibrate_interval(report_calibrate, REPORT_RATE, 0, MICROS_MICROS);
 TickTwo nc_led_interval(toggle_led, 1000, 0); // 1 second
@@ -60,6 +64,7 @@ TickTwo sleep_timeout(deep_sleep, SLEEP_TIMEOUT * 60000, 0);
 TickTwo button_sleep_timeout(deep_sleep, SLEEP_BUTTON_TIMEOUT * 1000, 1);
 
 void stop_all_timers () {
+  poll_interval.stop();
   report_interval.stop();
   ble_conn_check_interval.stop();
   calibrate_interval.stop();
@@ -79,6 +84,10 @@ void update_core1_timers () {
   #ifdef JOY_DEBUG
   debug_interval.update();
   #endif
+}
+
+void update_core0_timers () {
+  poll_interval.update();
 }
 
 float map_axis_value (uint16_t axis_state_raw) {
@@ -109,10 +118,17 @@ void read_axes () {
 
 #ifdef JOY_DEBUG
 uint32_t report_runs = 0;
+uint32_t poll_runs = 0;
 #endif
 
 void loop () {
   update_core1_timers();
+}
+
+void core0_loop (void *p) {
+  for(;;) {
+    update_core0_timers();
+  }
 }
 
 void start () {
@@ -162,6 +178,7 @@ void start () {
 
     joy.connect();
 
+    poll_interval.start();
     report_interval.start();
     ble_conn_check_interval.start();
     nc_led_interval.start();
@@ -176,6 +193,16 @@ void setup () {
 
   debug_interval.start();
   #endif
+
+  xTaskCreatePinnedToCore(
+    core0_loop, /* Function to implement the task */
+    "core0_loop", /* Name of the task */
+    8192,  /* Stack size in words */
+    NULL,  /* Task input parameter */
+    0,  /* Priority of the task */
+    &core0_handle,  /* Task handle. */
+    0 /* Core where the task should run */
+  );
 
   joy.prefs_init();
 
@@ -306,9 +333,9 @@ void ble_conn_check () {
   }
 }
 
-void report () {
+void poll () {
   #ifdef JOY_DEBUG
-  report_runs++;
+  poll_runs++;
   #endif
 
   read_buttons();
@@ -318,6 +345,12 @@ void report () {
   } else {
     read_axes();
   }
+}
+
+void report () {
+  #ifdef JOY_DEBUG
+  report_runs++;
+  #endif
 
   // FORCE SLEEP
 
@@ -353,8 +386,9 @@ void debug_common () {
     );
   }
   Serial.print(":: DP: " + String(joy.get_dpad_state()) + "\n");
-  Serial.print("report runs: " + String(report_runs) + "\n");
+  Serial.print("report runs: " + String(report_runs) + ", poll runs: " + String(poll_runs) + "\n");
 
   report_runs = 0;
+  poll_runs = 0;
 }
 #endif
